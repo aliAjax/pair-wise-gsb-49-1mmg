@@ -7,6 +7,10 @@ class DomainError(Exception):
     status = 400
     code = "domain_error"
 
+    def __init__(self, message: str = "", payload: Dict[str, Any] = None) -> None:
+        super().__init__(message)
+        self.payload = payload or {}
+
 
 class ValidationError(DomainError):
     status = 422
@@ -21,6 +25,22 @@ class NotFound(DomainError):
 class Conflict(DomainError):
     status = 409
     code = "conflict"
+
+
+class OptimisticConflict(Conflict):
+    """后到者的版本依据已失效：输入保留，调用方看到冲突后可重放。"""
+    code = "optimistic_conflict"
+
+
+class CapacityConflict(Conflict):
+    """容量账余额不足，预占不成立。"""
+    code = "capacity_exceeded"
+
+
+class StorageFailure(DomainError):
+    """批次入库未完成：依据最近完整批次恢复后重试。"""
+    status = 503
+    code = "storage_failure"
 
 
 class PermissionDenied(DomainError):
