@@ -3,31 +3,77 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>再保险合约与巨灾暴露管理</title>
+  <title>再保险合约容量账</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; color: #17212b; }
-    main { max-width: 960px; margin: auto; }
+    main { max-width: 1040px; margin: auto; }
     button { padding: .55rem .9rem; cursor: pointer; }
     pre { background: #f4f6f8; padding: 1rem; overflow: auto; border-radius: 8px; }
-    .row { display: flex; gap: 1rem; align-items: center; }
+    .row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; margin-bottom: .6rem; }
+    input { padding: .45rem .6rem; }
+    h2 { margin-top: 2rem; font-size: 1.05rem; }
   </style>
 </head>
 <body>
 <main>
-  <h1>再保险合约与巨灾暴露管理</h1>
-  <p>最小演示页。完整业务流程通过README中的JSON接口调用。</p>
-  <div class="row"><button id="load">加载记录</button><button id="stats">查看状态统计</button></div>
-  <pre id="output">点击上方按钮读取服务状态。</pre>
+  <h1>再保险合约容量账</h1>
+  <p>合约版本、赔案、摊回占用与审计共用一份容量账。占用与审计在同一批次事务落库。</p>
+
+  <h2>查询</h2>
+  <div class="row">
+    <input id="ref" value="RI-DEMO-1" size="14">
+    <button id="contract">合约最新版本</button>
+    <button id="ledger">容量账</button>
+    <button id="claims">赔案列表</button>
+    <button id="reviews">待复核</button>
+    <button id="stats">统计</button>
+  </div>
+
+  <h2>批量演示（管理员）</h2>
+  <div class="row">
+    <button id="demo">跑一遍完整流程</button>
+    <button id="recover">触发恢复/旧赔案回填</button>
+  </div>
+
+  <pre id="output">点击上方按钮查看结果。</pre>
 </main>
 <script>
-const headers = {"X-User-Id":"demo-admin","X-Role":"admin","X-Org":"demo"};
-async function show(path) {
-  const response = await fetch(path, {headers});
-  const data = await response.json();
-  document.getElementById("output").textContent = JSON.stringify(data, null, 2);
+const H = {"Content-Type": "application/json"};
+const actor = (role) => ({...H, "X-User-Id": "demo", "X-Role": role, "X-Org": "demo"});
+const out = (data) => document.getElementById("output").textContent = JSON.stringify(data, null, 2);
+const ref = () => document.getElementById("ref").value.trim();
+
+async function call(method, path, role, body) {
+  const response = await fetch(path, {method, headers: actor(role),
+    body: body ? JSON.stringify(body) : undefined});
+  return response.json();
 }
-document.getElementById("load").onclick = () => show("/api/records?limit=20");
-document.getElementById("stats").onclick = () => show("/api/stats");
+
+document.getElementById("contract").onclick = async () => out(await call("GET", "/api/contracts/" + ref(), "claims_officer"));
+document.getElementById("ledger").onclick = async () => out(await call("GET", "/api/contracts/" + ref() + "/ledger", "claims_officer"));
+document.getElementById("claims").onclick = async () => out(await call("GET", "/api/contracts/" + ref() + "/claims", "claims_officer"));
+document.getElementById("reviews").onclick = async () => out(await call("GET", "/api/reviews?status=open", "underwriter"));
+document.getElementById("stats").onclick = async () => out(await call("GET", "/api/stats", "claims_officer"));
+document.getElementById("recover").onclick = async () => out(await call("POST", "/api/admin/recover", "admin", {}));
+
+document.getElementById("demo").onclick = async () => {
+  const r = ref();
+  const trace = [];
+  const step = async (name, p) => { trace.push({step: name, result: p}); };
+  await step("create", await call("POST", "/api/contracts", "underwriter",
+    {reference: r, data: {event_id: "CAT-DEMO", attachment: 1000000, limit: 5000000,
+      cession_pct: 0.4, reinstatement_pct: 0.15, max_reinstatements: 1}}));
+  await step("bind", await call("POST", `/api/contracts/${r}/actions/bind`, "underwriter",
+    {expected_version: 1, data: {underwriter_id: "UW-1"}}));
+  await step("submit", await call("POST", `/api/contracts/${r}/claims`, "claims_officer",
+    {data: {claim_number: "CLM-DEMO-1"}}));
+  await step("calculate(预占)", await call("POST", "/api/claims/1/actions/calculate", "claims_officer",
+    {expected_version: 1, data: {approved_loss: 3000000}}));
+  await step("settle(只认该预占)", await call("POST", "/api/claims/1/actions/settle", "finance",
+    {expected_version: 2, data: {payment_reference: "PAY-DEMO-1"}}));
+  await step("ledger", await call("GET", `/api/contracts/${r}/ledger`, "claims_officer"));
+  out(trace);
+};
 </script>
 </body>
 </html>

@@ -1,11 +1,17 @@
 """领域基础类型与输入校验。"""
+
+import uuid
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 class DomainError(Exception):
     status = 400
     code = "domain_error"
+
+    def __init__(self, message: str = "", context: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message)
+        self.context = context or {}
 
 
 class ValidationError(DomainError):
@@ -23,6 +29,10 @@ class Conflict(DomainError):
     code = "conflict"
 
 
+class CapacityExceeded(Conflict):
+    code = "capacity_exceeded"
+
+
 class PermissionDenied(DomainError):
     status = 403
     code = "permission_denied"
@@ -33,6 +43,11 @@ class Actor:
     user_id: str
     role: str
     organization: str = ""
+
+
+def new_batch_no() -> str:
+    """生成占用/审计共用的批次号；客户端也可自带幂等批次号。"""
+    return uuid.uuid4().hex
 
 
 def text(data: Dict[str, Any], key: str) -> str:
@@ -72,6 +87,12 @@ def integer(data: Dict[str, Any], key: str, minimum: int = None, maximum: int = 
     if maximum is not None and value > maximum:
         raise ValidationError("%s不能大于%s" % (key, maximum))
     return value
+
+
+def optional_integer(data: Dict[str, Any], key: str, default: int = None) -> Optional[int]:
+    if data.get(key) is None:
+        return default
+    return integer(data, key)
 
 
 def choice(data: Dict[str, Any], key: str, allowed: List[str]) -> str:
